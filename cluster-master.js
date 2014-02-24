@@ -15,6 +15,9 @@ var cluster = require("cluster")
 , util = require('util')
 , minRestartAge = 2000
 , danger = false
+, exec = require("child_process").exec
+, _ = require("underscore")
+, fluent = require("fluent-async")
 
 exports = module.exports = clusterMaster
 exports.restart = restart
@@ -24,6 +27,7 @@ exports.quit = quit
 
 var debugStreams = {}
 function debug () {
+
   console.error.apply(console, arguments)
 
   var msg = util.format.apply(util, arguments)
@@ -83,7 +87,8 @@ function clusterMaster (config) {
 
   // now make it the right size
   debug((replAddressPath) ? 'resize and then setup repl' : 'resize')
-  resize(setupRepl)
+  resize()
+  setupRepl()
 }
 
 function select (field) {
@@ -96,8 +101,10 @@ function select (field) {
 }
 
 function setupRepl () {
-  if (!replAddressPath) return  // was disabled
+    console.log("setup repl")
+    if (!replAddressPath) return  // was disabled
 
+  console.log("setup repl")
   debug('setup repl')
   var socket = null
   var socketAddress = undefined
@@ -161,6 +168,9 @@ function setupRepl () {
         'states      - map of id to worker states',
         'debug(a1)   - output `a1` to stdout and all REPLs',
         'sock        - this REPL socket',
+        'gitPull     - initiates a git pull in the CWD',
+        'setConfig   - sets environment variables',
+        'getConfig   - gets environment variables',
         '.exit       - close this connection to the REPL'
       ]
 
@@ -172,6 +182,10 @@ function setupRepl () {
         stop: quit,
         kill: quitHard,
         cluster: cluster,
+        gitPull: gitPull,
+        setConfig: setConfig,
+        getConfig: getConfig,
+        ywReload: ywReloadREPL,
         get size () {
           return clusterSize
         },
@@ -503,4 +517,59 @@ function setupSignals () {
   process.on("exit", function () {
     if (!quitting) quitHard()
   })
+}
+
+
+function gitPull () {
+    exec("git pull", function(err, out){
+      if(err){
+          debug("ERROR: " + err)
+      } else {
+          debug(out.toString())
+      }
+    });
+    // should initiate a git pull on the CWD
+}
+
+function setConfig (data) {
+    var key;
+    if(typeof data == "object"){
+        for (key in data) {
+            env[key] = data[key];
+        }
+    } else {
+        debug("ERROR: No object supplied")
+    }
+    getConfig()
+    // should set the config and then restart the processes
+}
+
+function getConfig () {
+    // should set the config and then restart the processes
+    debug(JSON.stringify(env));
+}
+
+function git (cb) { exec("git pull", cb) }
+function brunch (data, cb) {
+    (data && data.brunch) ? exec("brunch b", cb) : cb()
+}
+function setEnv (data) { _.extend(env, data); }
+
+
+
+function ywReload (data, callback) {
+    debug("yw reload...")
+    fluent.create({data:data})
+        .strict()
+      .async("git", git).wait()
+      .async("brunch", brunch, "data")
+      .sync("setEnv", setEnv, "data").wait()
+      .async("restart", restart)
+      .run(callback)
+}
+
+function ywReloadREPL (data) {
+    ywReload(data, function(err) {
+        debug((err) ? "ERROR: " + err : "SUCCESS")
+    })
 }
